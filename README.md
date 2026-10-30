@@ -1,5 +1,7 @@
 # HDL Openings
 
+**Status: In development. Core functionality is implemented; testing and further development are ongoing.**
+
 pyRevit tools for creating, updating, identifying and numbering MEP openings in Autodesk Revit.
 
 **Version: 0.9.8** · Author: Dmytro Havrikov
