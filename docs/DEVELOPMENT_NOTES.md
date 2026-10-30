@@ -1,204 +1,177 @@
-# HDL Openings v0.9.8
+# HDL Openings — Development Notes
 
-0.9.8: Restored the previously delivered Number Openings v2.0.1 (script, bundle and icons) in NumberOpenings.pushbutton. Multiple editable open models show a checkbox selection; a single model runs without the selection dialog. Selected models are numbered together by shared Z, X, Y from ID #1. Identify MEP and Create / Update are unchanged from 0.9.7.
+English technical overview for **v0.9.8**. [Original development notes in Russian](DEVELOPMENT_NOTES.ru.md) · [Installation](../README.md) · [Identify MEP guide](../IDENTIFY_MEP_README.md)
 
-0.9.7: Identify MEP v0.9.6 skips unloaded links instead of blocking every opening. Results are recalculated using the current model and loaded direct links only. The report lists skipped link instance IDs; stored identification metadata records the source scope and unavailable links. Existing labels can change or clear when their only MEP source is unloaded. Create / Update and Number Openings are unchanged.
+The original notes preserve detailed implementation history. This overview describes the current package and distinguishes implemented behavior from historical notes.
 
-This combined release adds Identify MEP and includes Number Openings. See IDENTIFY_MEP_README.md for installation, Excel mapping and identification rules. The Create / Update implementation is retained from v0.8.3.
+## Architecture and command scope
 
-# HDL Openings 0.8.3
+HDL Openings is a pyRevit extension for creating and synchronizing editable opening instances in the active Revit project. Linked construction models provide read-only context; the extension does not modify or cut them.
 
-0.8.3: кнопка Create / Update с иконками светлой и тёмной темы находится на вкладке HDL Openings, панели Openings первой, перед Number Openings. Команда нумерации остаётся в установленном HDL_NumberOpenings.extension. Заменить каталог HDL Openings.extension целиком, не копировать поверх со сохранением старой HDL.tab, затем перезагрузить pyRevit. Изменены только интерфейс и версия; алгоритм 0.8.2 сохранён.
+| Command | Edited data | Geometry sources |
+| --- | --- | --- |
+| Create / Update | Managed openings and synchronization metadata in the active project | MEP in the active project; walls, floors and roofs in the active project and loaded direct links |
+| Identify MEP | Opening identification data in the active project | Pipes, ducts, conduits and cable trays in the active project and loaded direct links |
+| Number Openings | `SP_OP_Id` in selected editable open projects | Shared coordinates of eligible elements in those projects |
 
-0.8.2: исправлена передача Z для стеновых OneLevelBased семейств (круглого и прямоугольного): в NewFamilyInstance передаётся Z модели минус Level.ProjectElevation. Расчётные точки, поворот и данные синхронизации остаются в системе координат текущей модели. По отчёту 0.8.1 Revit добавлял отметку уровня 29500 мм к уже абсолютной Z, получалось 57441.320 вместо 27941.320 мм. Проверка результата и атомарный откат сохранены. Перекрытия и крыши этим исправлением не затронуты; ограничения переменных слоёв не изменены.
+Commands run explicitly. There is no `DocumentChanged` handler or background elevation updater in this package. Runtime shared-parameter calculation and Tag Openings are separate projects.
 
-Расширение pyRevit для создания и синхронизации master openings в текущей координационной Revit-модели. Create Openings пересчитывает проходки по доступным источникам. При прежнем условии пересечения изменившаяся геометрия заменяется с прежним OpeningGuid. Изменившееся условие создаёт новое отверстие с новым GUID, старое удаляется. Выполнены 242 локальных теста; внутри Revit версия ещё не запускалась.
+## Family and parameter contract
 
-## Установка
+RFA files are not included. Load the four configured families before using Create / Update.
 
-1. Сохранить предыдущую рабочую версию отдельно. Полностью заменить каталог `HDL Openings.extension` из этого архива в каталоге расширений pyRevit. Перезагрузить pyRevit один раз для загрузки новой версии кода.
-2. Загрузить четыре семейства с именами из `settings.json`. Файлы RFA в архив не включены. Проверяются параметры экземпляров, тип размещения и Always Vertical.
-3. Версии Payload 3/4/5/6 используют прежние правила. При первом успешном расчёте в 0.8.0 соответствующие экземпляры пересоздаются с новыми GUID. Непроверенные проходки сохраняются с диагностикой. Вручную удалять тестовый набор не требуется.
-4. Открыть координационную модель, нажать HDL Openings → Openings → Create / Update и выбрать один Scope Box из списка текущего документа. Выбора MEP и источников нет: MEP берутся только из текущей модели; Walls/Floors/Roofs — из текущей модели и прямых загруженных Revit Links.
-5. Проверить результат и диагностический отчёт. Один Undo возвращает состояние до синхронизации, включая удалённые и заменённые экземпляры; Redo восстанавливает результат. Ошибка API или записи откатывает все изменения запуска.
+| Family | Writable instance dimensions | Local geometry convention | Placement |
+| --- | --- | --- | --- |
+| `BL Opening Rect Wall` | `Width`, `Height`, `Depth` | Width centered on X; Height starts at Ref Level along +Z; Depth extends along +Y | OneLevelBased; Work Plane-Based off; Always Vertical on |
+| `BL Opening Round Wall` | `Diameter`, `Depth` | Circle centered at Ref Level; Depth extends along +Y | OneLevelBased; Work Plane-Based off; Always Vertical on |
+| `BL Opening Rect Floor` | `Width`, `Height`, `Depth` | Width/Height centered on X/Y; top of Depth at Ref Level, extending along −Z | Work Plane-Based on; Always Vertical off |
+| `BL Opening Round Floor` | `Diameter`, `Depth` | Circle centered on the reference plane; Depth extends along −Z | Work Plane-Based on; Always Vertical off |
 
-Дальнейшее редактирование только `settings.json` не требует перезагрузки pyRevit: новые корректные значения применяются при следующем нажатии команды.
+Dimensions must be writable instance Length parameters; they need not be shared. Duplicate names and type parameters substituted for the required instance parameters are rejected. If several family types exist, the first by name is selected and reported. Roof openings use the floor families.
 
-## Семейства и параметры
+Create / Update does not write `SP_BOM_*` values: dimensional values are handled by family formulas. `SP_BOM_Absolute_Elevation` is excluded from this command; its runtime service is external to the package.
 
-| Семейство | Размеры экземпляра | Локальные привязки | Настройки |
-|---|---|---|---|
-| BL Opening Rect Wall | Width, Height, Depth | Width симметрично по X; низ Height на Ref Level, Height по +Z; Depth от Center Front/Back по +Y | Work Plane-Based No, Always Vertical Yes |
-| BL Opening Rect Floor | Width, Height, Depth | Width/Height симметрично по X/Y; верх Depth на Ref Level, Depth по −Z | Work Plane-Based Yes, Always Vertical No |
-| BL Opening Round Wall | Diameter, Depth | Центр окружности на Ref Level; Depth от Center Front/Back по +Y | Work Plane-Based No, Always Vertical Yes |
-| BL Opening Round Floor | Diameter, Depth | Центр окружности в опорной плоскости; Depth по −Z | Work Plane-Based Yes, Always Vertical No |
+Floor and roof openings use existing source faces, with `CreateLinkReference` for linked faces. No ReferencePlane or SketchPlane is created. Suitable top/bottom planar faces must be parallel to the calculated normal. A parallel external face with an offset can support placement at an internal base-layer boundary. The projected insertion point must belong to the actual face region. Failed hosting retains the corresponding existing opening and is reported.
 
-Wall — OneLevelBased без host, Floor — WorkPlaneBased. Параметры — обычные параметры экземпляра типа Length, API должен иметь возможность записи. Shared не требуется. Одноимённые дубли и подмена параметрами типа не допускаются. При нескольких типах берётся первый по имени, выбранный тип выводится в отчёт.
+## Cross-sections and insulation
 
-SP_BOM-параметры не записываются: размеры обслуживаются формулами семейства. Защищённая SP_BOM_Absolute_Elevation полностью исключена из расчёта и проверки команды; её обновляет существующий runtime-сервис.
+Create / Update supports straight MEP with constant Round, Rectangular or Oval profiles. Oval ducts are treated as flat ovals with straight central sections and semicircular ends, rather than ellipses. Connector vectors account for profile rotation.
 
-Floor размещается по существующей исходной грани перекрытия или крыши, без ReferencePlane/SketchPlane. Для linked грани используется CreateLinkReference. Рассматриваются верхние и нижние исходные PlanarFace, параллельные расчётной нормали. Для геометрически изменённого верха предпочтительна нижняя грань. Проверяются принадлежность проекции реальной грани, рабочее смещение и окончательное положение экземпляра. Опорная поверхность базового слоя может быть внутренней границей состава типа. Привязка использует существующую параллельную наружную грань со смещением; точка и нормаль базового слоя сохраняются.
+Pipe and duct insulation is obtained through `InsulationLiningBase.GetInsulationIds` in the active document. Insulation solids participate in intersection detection, including insulation-only entry. Internal duct lining is not added to the outside envelope. Conduits use their actual outside diameter; separate custom coverings are not automatically treated as insulation.
 
-Крыши включены: их базовый слой определяется по тому же правилу, что и у стен/перекрытий. Используются семейства BL Opening Rect Floor и BL Opening Round Floor.
+Missing insulation thickness/geometry and multiple separate insulation elements on one MEP element are reported rather than silently calculating from the bare element.
 
-## Круглая или прямоугольная форма
+## Circular and rectangular sizing
 
-Круглая форма допускается только для Pipes и Conduits. Воздуховоды любого профиля и кабельные лотки всегда дают прямоугольную форму.
+Only pipes and conduits can produce circular openings. Ducts of every profile and cable trays produce rectangular openings.
 
-1. Считывается фактический наружный диаметр трубы/кондуита, не номинальный DN и не Trade Size. Используются RBS_PIPE_OUTER_DIAMETER и RBS_CONDUIT_OUTER_DIAM_PARAM.
-2. Существующая изоляция прибавляется с двух сторон: D_e = D_out + 2s.
-3. По D_0 = D_e + 2t выбирается ближайшая **строго большая** коронка. При равенстве берётся следующая.
-4. Проверяется вся косая проходка по глубине, а не угол в градусах: D_required = D_e/cos(α) + L*tan(α) + 2t. Центр круга находится в середине смещения оси через конструкцию.
-5. Круглая форма допускается при D_required ≤ D_core и L ≤ MaxCoreDepth. Дополнительно фактическая глубина повторно определяется пересечением круглого Opening Solid с принятыми слоями; для уточнения центра/глубины предусмотрено не более восьми итераций с проверкой сходимости.
-6. Если коронки нет, конверт не помещается, глубина превышена либо уточнение глубины не сошлось, применяется прямоугольная форма с причиной в отчёте. Следующая увеличенная коронка для обхода углового конверта не подбирается.
+1. Read the actual outside diameter using `RBS_PIPE_OUTER_DIAMETER` or `RBS_CONDUIT_OUTER_DIAM_PARAM`, not nominal DN or Trade Size.
+2. Include insulation on both sides: `D_e = D_out + 2s`.
+3. Select the first configured core strictly larger than `D_0 = D_e + 2t`. An exact match advances to the next size.
+4. Check the complete oblique penetration envelope: `D_required = D_e / cos(α) + L × tan(α) + 2t`.
+5. Accept the circular shape when `D_required ≤ D_core` and `L ≤ MaxCoreDepth`. The center lies halfway along the lateral axis displacement through construction. Actual depth is rechecked against the accepted layers, with up to eight center/depth refinement iterations and a convergence check.
+6. If the core is unavailable, the envelope does not fit, depth exceeds the limit or refinement fails, use a rectangular opening and report why. A further enlarged core is not selected merely to accommodate inclination.
 
-Ряд по умолчанию: 1, 1¼, 1½, 2, 3, 4, 5, 6, 8, 10, 12 дюймов. 2½ и 3½ дюйма исключены из начального ряда. 1 дюйм = 25.4 мм. Начальный MaxCoreDepth — 1000 мм включительно; это принятый предел алгоритма, а не универсальное ограничение оборудования.
+Here, `s` is insulation thickness, `t` is clearance on each side, `α` is the angle from the penetration normal and `L` is normal penetration depth.
 
-Для прямоугольной формы сначала рассчитывается полный наружный конверт с изоляцией, наклоном и поворотом профиля, затем добавляются припуски. Width и Height округляются вверх до кратности `rect_size_step_mm` (по умолчанию 50 мм). Увеличение распределяется симметрично относительно центра сечения. 312 → 350 мм; 400 → 400 мм. Depth не округляется.
+Default core sizes: **1, 1¼, 1½, 2, 3, 4, 5, 6, 8, 10 and 12 inches**. The initial series excludes 2½ and 3½ inches. One inch is 25.4 mm. Default maximum core depth is 1000 mm inclusive; this is an algorithm setting, not a universal equipment limit.
 
-## Изоляция и сечения
+Rectangular sizing accounts for outside profile, insulation, inclination, rotation and clearance. Width and Height are rounded up to `rect_size_step_mm`, initially 50 mm, with the increase distributed symmetrically about the section center: 312 → 350 mm, 400 → 400 mm. Depth is not rounded.
 
-Изоляция труб и воздуховодов извлекается через InsulationLiningBase.GetInsulationIds только из текущего документа. Связанные MEP и их изоляция не рассматриваются. Толщина берётся из связанного insulation-элемента. Его Solid участвует в обнаружении пересечения вместе с MEP, поэтому учитывается и вхождение только изоляцией. Внутренняя облицовка воздуховода не прибавляется к наружному размеру.
+## Structural base layer and ThroughAll
 
-Поддержаны Round, Rectangular и Oval. Овальное сечение Revit трактуется как плоский овал: прямой участок и два полукруга. Опорная функция использует эту форму, а не эллипс и не ограничивающий прямоугольник. Изоляция увеличивает наружный контур. Поворот профиля учитывается векторами коннектора.
+A base layer must satisfy **both** `Function = Structure [1]` and the Structural Material designation represented by `CompoundStructure.StructuralMaterialIndex`. The instance-level Structural parameter is not used. Without an eligible, actually intersected layer, no opening is created; there is no fallback to a nonstructural layer.
 
-У кондуитов нет штатного insulation-host через этот API: используется реальный наружный диаметр. Дополнительные пользовательские оболочки или отдельные элементы не принимаются за изоляцию автоматически.
+Select the thickest eligible layer, rather than the construction with the greatest total thickness. For equal thicknesses, compare the 3D distance from the active project's Project Base Point to the penetration center on each layer's mid-plane. Linked geometry is transformed to the same coordinates. Stable coordinates and UniqueId resolve exact ties.
 
-Если insulation указан, но толщина/геометрия недоступны, MEP выводится в диагностику вместо молчаливого расчёта по голому элементу. Несколько отдельных insulation-элементов на одном MEP пока требуют отдельного сценария и также диагностируются.
+Layers are reconstructed from homogeneous CompoundStructure definitions and source solids by half-space clipping along the normal. Material physical properties do not determine eligibility. Vertically heterogeneous walls, folded undersides and variable structural base-layer thickness require separate handling. A variable upper layer over a constant base is permitted.
 
-## Базовый слой и прилегающие конструкции
+Penetrations of the **same MEP element** are grouped along compatible normals when `Gap ≤ T_gap`, initially 50 mm. Opposite normals are aligned; nonparallel directions remain separate. Different MEP elements are **not merged into a common opening**.
 
-Обрабатываются стены, перекрытия и крыши текущей модели и загруженных прямых связей. MEP берутся только из текущего документа.
+| `ThroughAll` | Resulting depth |
+| --- | --- |
+| `0` | Selected base layer only |
+| `1` (default) | Accepted adjacent construction/layer group, including finishes and gaps |
 
-Базовый слой должен одновременно удовлетворять двум условиям:
+Both modes require an eligible base layer. For a straight assembly with a 20 mm finish and marked 100 mm structural layer, the depths are 100 mm and 120 mm respectively. Entry and `K_slope` checks apply to the base layer; dimensions and core fit are recalculated over the final ThroughAll volume.
 
-1. Function = Structure [1].
-2. В строке слоя установлена галочка Structural Material; API определяет её через CompoundStructure.StructuralMaterialIndex.
+## Settings and cache
 
-Параметр Structural у экземпляра не читается и не влияет на решение. Function без галочки не подходит; галочка без Function Structure [1] также не подходит. Без подходящего фактически пересечённого слоя отверстие не создаётся. Резервного выбора ненесущего слоя нет.
+`settings.json` is located in `HDL Openings.extension`; its path is resolved relative to the extension, not the working directory.
 
-Из нескольких подходящих слоёв группы выбирается наибольшая толщина выбранного слоя, а не общая толщина конструкции. При равенстве сравнивается трёхмерное расстояние от Project Base Point текущей модели до центра проходки в срединной плоскости слоя. Linked геометрия приводится к этой же системе координат. При точном равенстве расстояний используются стабильные координаты и UniqueId.
+| Key | Default | Accepted values |
+| --- | --- | --- |
+| `schema_version` | `1` | Integer 1 only |
+| `ThroughAll` | `1` | Integer 0 or 1 |
+| `clearance_mm` | `25` | 0–1000 mm |
+| `gap_mm` | `50` | 0–10000 mm |
+| `touch_mm` | `25` | 0–1000 mm |
+| `k_slope` | `1.5` | 1–100 |
+| `max_core_depth_mm` | `1000` | 0.1–10000 mm |
+| `rect_size_step_mm` | `50` | 0.1–1000 mm |
+| `core_diameters_inch` | Series above | 1–256 unique numbers; each 0.01–120 inches |
+| `families` | Four family names | Distinct nonempty strings, at most 200 characters each |
+| `sync_length_tolerance_mm` | `0.1` | 0.0001–10 mm |
+| `sync_angle_tolerance_deg` | `0.01` | 0.000001–1 degree |
 
-Слои восстанавливаются из однородной CompoundStructure и исходных Solid полупространственными отсечениями по нормали. Значения физических свойств и MaterialId не используются для выбора базы. Складчатый низ, неоднородные по высоте стены и переменная толщина выбранного базового слоя требуют отдельного решения и диагностируются. Верхний переменный слой над неизменным базовым допускается.
+Required family keys: `rect_wall`, `rect_floor`, `round_wall`, `round_floor`. Core sizes are sorted after validation. `ThroughAll` and `sync_*` keys can be omitted for compatibility with older settings; defaults apply. Synchronization tolerances compare state and do not replace geometric clearances or rounding steps.
 
-Проходки одного MEP группируются по нормали при Gap <= T_gap (по умолчанию 50 мм). Непараллельные направления разделяются, противоположные нормали согласуются. При повторном расчёте нельзя захватывать ранее отделённую группу.
+Files are limited to 65536 bytes and nesting depth 16. UTF-8 with optional BOM is accepted. Unknown/duplicate keys, missing required fields, unsupported versions, invalid numeric types, NaN/Infinity and out-of-range values are rejected. JSON contains data only.
 
-ThroughAll в settings.json:
+The persistent engine checks file metadata once per run. Unchanged settings are not reread or reparsed. Changed files are read into a temporary structure, checked for concurrent changes and fully validated before atomically replacing the cache. One immutable snapshot is used throughout the run. SHA-256 identifies the settings used in reports and instance metadata.
 
-- 0 — отверстие только через выбранный базовый слой.
-- 1 — через всю принятую группу прилегающих слоёв и конструкций, включая отделку и зазоры.
+Invalid, missing or inaccessible settings retain the last valid snapshot and produce a warning. If no valid snapshot exists, the command stops before a model transaction. Edits preserving all tracked metadata may not be detected.
 
-По умолчанию ThroughAll = 1. Оба режима требуют допустимого базового слоя. Пример: Finish 20 мм + отмеченный Structure [1] 100 мм — база 100 мм; глубина при ThroughAll 0 равна 100 мм, при 1 — 120 мм для прямой однородной конструкции.
+## Scope Box
 
-Entry сравнивается с T_touch (25 мм) по базовому слою. K_slope (1.5) проверяет след оси только в базовом слое. Размеры и вмещение в коронку пересчитываются через окончательный объём выбранного ThroughAll.
+Create / Update requires one Scope Box from the active project. The picker displays its name and ElementId. Cancellation, no boxes or unreadable box geometry produces no changes; processing does not automatically switch to the whole model.
 
-## settings.json
+The complete final opening volume must fit inside the box in all three dimensions. Checks account for box rotation, opening orientation, final rounded dimensions and depth. Circular openings are checked as cylinders, with a small boundary tolerance. Partially outside openings are skipped.
 
-Файл расположен непосредственно в `HDL Openings.extension`, рядом с каталогом вкладки и `lib`. Код разрешает путь относительно своего расположения, а не текущего рабочего каталога.
+An oriented region is reconstructed from Scope Box line geometry, rather than substituting a world-axis-aligned bounding box. Preliminary MEP bounding-box filtering preserves long elements whose endpoints are outside but whose penetration is inside. Construction is analyzed without clipping to avoid changing layer groups or depth.
 
-| Ключ | Начальное значение | Допустимый диапазон |
-|---|---|---|
-| schema_version | 1 | только целое 1 |
-| ThroughAll | 1 | целое 0 или 1, bool и строки не допускаются |
-| clearance_mm | 25 | 0..1000 мм |
-| gap_mm | 50 | 0..10000 мм |
-| touch_mm | 25 | 0..1000 мм |
-| k_slope | 1.5 | 1..100 |
-| max_core_depth_mm | 1000 | 0.1..10000 мм |
-| rect_size_step_mm | 50 | 0.1..1000 мм |
-| core_diameters_inch | утверждённый ряд | 1..256 уникальных чисел, каждое 0.01..120 дюймов |
-| families | четыре имени | непустые различные строки, не более 200 символов |
-| sync_length_tolerance_mm | 0.1 | 0.0001..10 мм |
-| sync_angle_tolerance_deg | 0.01 | 0.000001..1 градус |
+Existing openings not fully inside are not deleted, replaced or assigned new synchronization metadata. If either the old or new position lies outside, the existing opening is retained for review; choose a box containing both positions to synchronize that movement. Scope Box selection does not itself change OpeningGuid.
 
-В `families` обязательны четыре ключа: rect_wall, rect_floor, round_wall, round_floor. Ряд коронок сортируется после проверки. ThroughAll и два ключа sync_* необязательны для совместимости с ранее выпущенным JSON; при отсутствии применяются приведённые начальные значения. Они сравнивают состояние и не заменяют Clearance, T_gap или шаг округления. Угол преобразуется в допуск расстояния между единичными векторами. Дубликаты, неизвестные ключи и пропущенные обязательные поля — ошибка. JSON содержит только данные и не исполняется.
+## Identity, storage and transactions
 
-Максимальный размер файла — 65536 байт, глубина вложенности — 16. Кодировка UTF-8; BOM допускается. Нулевой шаг, отрицательные значения, bool вместо числа, строки вместо чисел, NaN/Infinity, дублирующиеся JSON-ключи и неподдерживаемая версия схемы отвергаются до модели. Чрезмерная вложенность проверяется до запуска JSON-парсера.
+Each managed FamilyInstance stores an Extensible Storage entity. Schema `HDLOpeningsSynchronizationV2` contains `OpeningGuid` (`System.Guid`) and JSON `Payload`. No document-level DataStorage is used. The schema GUID is common; OpeningGuid belongs to a penetration condition. Replacing an instance changes its Revit UniqueId.
 
-## Кеш и применение изменений
+Payload version 7 includes source/UniqueId identifiers, construction layer indices and fingerprints, selected base, MEP axis/profile/insulation, interaction intervals, opening axes and source face, final dimensions/shape/placement/type, algorithm version, settings fingerprint and run identifier. Lengths use Revit internal feet; directions use unit vectors.
 
-Кеш хранится в памяти persistent engine, удерживается в отдельном объекте сессии. При каждом запуске один раз проверяются метаданные файла: время изменения, размер и доступные признаки замены файла. Неизменённый файл не читается и JSON не разбирается. При редактировании с сохранением одновременно всех метаданных изменение не обнаруживается; обычное сохранение редактором меняет время/идентичность файла.
+The condition key uses the MEP source/UniqueId, selected base and exact set of construction sources/UniqueIds/layer indices/definition fingerprints. Enumeration order does not matter. Coordinates, angles and sizes are state, rather than permanent identity.
 
-Файл читается во временную структуру, сравниваются метаданные до/после чтения, затем выполняется полная валидация. Только после успеха кеш атомарно заменяется. Снимок настроек неизменяемый и применяется весь запуск; в геометрических циклах чтения настроек с диска нет. Использованная версия определяется SHA-256 файла, короткий идентификатор выводится в отчёт и полный сохраняется в Extensible Storage экземпляра.
+| Situation | Action |
+| --- | --- |
+| Same condition and same state | Keep the instance; refresh metadata if needed |
+| Same condition; changed position, orientation, shape, type or sizes | Replace the instance, preserving OpeningGuid |
+| Changed participants, base or layer definitions | Create a new OpeningGuid; remove the predecessor after successful verification |
+| Confirmed deleted MEP or successfully checked MEP no longer requiring a passage | Delete the obsolete managed opening |
+| Calculation, link availability or hosting uncertainty | Retain the corresponding opening and report the reason |
+| Duplicate identity or unreadable/incompatible entity | Do not resolve by arbitrary identity inheritance |
 
-Некорректная правка сохраняет последний корректный кеш и вызывает видимое предупреждение. Неизменённый уже отвергнутый файл повторно не разбирается. Недоступный или удалённый файл также не очищает корректный кеш. Если корректного снимка ещё нет, команда завершается до транзакции без изменения модели. Любая ошибка файла не заменяет часть настроек и не выходит в модельную транзакцию.
+Unmanaged instances are not modified by synchronization. Old Payload versions 3–6 are migrated by recreating successfully checked penetrations inside the Scope Box with new GUIDs; uncertain or out-of-scope instances remain.
 
-## Ограничения
+Actions are planned before writing and committed in one `HDL Create Openings` transaction. New instances are verified before predecessors are deleted. Creation, deletion or metadata-write failure rolls back the run. Undo/Redo applies to the whole transaction. Reports distinguish create, replace, delete, refresh, keep, retain and skip.
 
-- Только прямолинейные MEP с постоянным профилем; фитинги не анализируются.
-- Стены — прямые вертикальные. Перекрытия — с компланарным плоским низом; общий наклон допустим. Складчатый низ диагностируется. Изменение верхней поверхности определяется по фактической геометрии; для размещения необходима существующая подходящая плоская грань. Крыши обрабатываются по тем же требованиям к геометрии и базовому слою.
-- Размеры сечений считаются аналитически. Для Entry и глубины используются консервативные границы Boolean Solid ядра Revit: на сложных обрезанных поверхностях возможен запас. Непараллельные поверхности не объявляются полностью поддержанными.
-- MEP только текущей модели. Связи используются только для конструкций: прямо загруженные links, без обхода вложенных. Linked модели не изменяются и не вырезаются. Создаются только master instances в текущей модели.
-- Нет междисциплинарного объединения разных MEP; объединяются проходки одного MEP по слоям.
-- Нет отдельного Through/LengthPartial/LengthThrough, ExtensionStart/End. SP_OP_MEPElements и нумерация — отдельные команды, здесь не выполняются.
-- Нет собственного ElevationUpdater. Существующий runtime не регистрируется и не отключается расширением. DocumentChanged категорически запрещён; для будущих событийных сценариев разрешён только IUpdater.
-- Изменение JSON и источников применяется при следующем вызове команды. Фонового обновления нет. Если результат тот же, экземпляр не пересоздаётся; изменившиеся исходные данные могут быть обновлены в его Entity.
+## Passage-local unsupported-host checks
 
-## Выбранный Scope Box
+The v0.9.6 correction checks unsupported construction against each individual opening volume, including clearance. A distant unsupported host intersecting the full MEP bounding box no longer blocks unrelated passages.
 
-При каждом вызове выбирается один Scope Box текущей модели. В списке показываются имя и ElementId, поэтому одинаковые имена различаются. Без Scope Box, при отмене или ошибке чтения его геометрии изменений нет. Переключение на всю модель автоматически не выполняется.
+Bounding boxes are preliminary filters; transformed physical construction solids determine final overlap. Failed-host solids are extracted lazily and cached per run. Local overlap, unavailable local solids or Boolean failure preserves existing openings and skips affected new passages. Diagnostics identify the link, host, MEP and check stage. Variable structural base layers still require separate local-thickness support.
 
-Отверстие допускается к созданию/обновлению только когда его полный окончательный объём находится внутри выбранного Scope Box по трём измерениям. Учитываются поворот Scope Box, положение и ориентация отверстия, глубина и окончательные округлённые размеры. Круглая форма проверяется аналитически как цилиндр; она не заменяется квадратом. Граница включается с малым численным допуском. Частично выходящие отверстия пропускаются с диагностикой.
+## Identification and numbering
 
-Для Scope Box считываются направления его линейной геометрии и строится ориентированная область. Мировой axis-aligned BoundingBox не заменяет её при повороте. Размеры MEP по-прежнему рассчитываются аналитически без чтения рёбер MEP.
+Identify MEP processes the four configured opening families, including manually placed instances. The Excel mapping defines system labels and disciplines. Results are written to `SP_OP_MEP_Elements`; detailed provenance is saved in a separate Extensible Storage entity. Synchronization metadata and numbering are not overwritten. See the [Identify MEP guide](../IDENTIFY_MEP_README.md) for exact qualification and mapping rules.
 
-MEP берутся только из текущей модели. Предварительный отбор использует пересечение их BoundingBox с областью; длинная труба с торцами снаружи и проходкой внутри не теряется. Неизвестные границы не приводят к молчаливому исключению MEP. Конструкции продолжают анализироваться в полной геометрии, чтобы обрезка по Scope Box не уменьшала глубину и не меняла группировку слоёв.
+Unloaded links are skipped and reported. Results are recalculated from available geometry; previous values can change or clear if their only source is unloaded. Load all required links before a complete run. Rerun identification after Create / Update replaces an opening instance.
 
-Существующие отверстия, не помещающиеся целиком в выбранный Scope Box, не удаляются, не заменяются и не получают новые служебные данные. Если старое положение снаружи, а новое внутри, связанная проходка сохраняется для проверки вместо создания дубликата. Если новое положение выходит за границу, старое также сохраняется. Для такой синхронизации нужно выбрать Scope Box, охватывающий оба положения. Независимые корректные проходки внутри обрабатываются обычным способом.
+Number Openings v2.0.1 processes eligible elements with writable Text instance parameter `SP_OP_Id`. One editable open project runs without a model picker; multiple projects show a checkbox selection. Selected models are numbered together by shared Z → X → Y from `ID #1`. Their shared coordinates must be coordinated. Numbering is independent of the Create / Update Scope Box.
 
-Scope Box является областью запуска, а не частью идентификатора условия. Смена выбранного Scope Box сама по себе не меняет OpeningGuid. Создание, обновление и удаление внутри области остаются одной транзакцией Undo/Redo.
+## Limitations
 
-## Условие пересечения и OpeningGuid
+- Create / Update supports straight MEP with constant profiles; fittings are not analyzed.
+- Walls must be straight and vertical. Floors need a coplanar flat underside; overall slope is permitted. Folded undersides are reported. Roofs follow equivalent geometry/base-layer requirements.
+- Section dimensions are analytical. Entry/depth use conservative bounds from Revit Boolean solids; complex trimmed surfaces can add allowance. Arbitrary nonparallel surfaces are not claimed as fully supported.
+- Create / Update uses active-model MEP only. Linked construction is limited to loaded direct links, without nested-link traversal.
+- Different MEP elements are not combined into one opening. Annotation transfer and runtime elevation calculation are outside synchronization scope.
 
-Данные хранятся в Extensible Storage каждого управляемого FamilyInstance. Document и отдельный DataStorage не используются. Схема HDLOpeningsSynchronizationV2 содержит OpeningGuid (System.Guid) и Payload (JSON). GUID схемы общий; OpeningGuid относится к конкретному условию пересечения. Revit UniqueId экземпляра меняется при пересоздании.
+## Version history
 
-Payload версии 7 содержит:
+| Version | Change |
+| --- | --- |
+| 0.9.8 | Restored Number Openings v2.0.1 with multi-model selection and shared-coordinate numbering; other commands unchanged from 0.9.7 |
+| 0.9.7 | Identify MEP skips unloaded links, recalculates from available sources and records unavailable links |
+| 0.9.6 | Localized unsupported-host checks to each opening volume |
+| 0.8.3 | Added Create / Update ribbon placement and light/dark icons; standalone numbering described in historical notes is now bundled |
+| 0.8.2 | Corrected wall OneLevelBased insertion Z to model Z minus `Level.ProjectElevation`; calculated geometry and synchronization data remain in active-model coordinates |
+| 0.8.0 | Introduced revised penetration-condition identity and Payload 7 migration |
 
-- Источник и UniqueId MEP, источники/UniqueId конструкций и индексы участвующих слоёв, выбранную базу.
-- Отпечаток определения слоёв: функции, толщины, индекс Structural Material и переменный слой. Параметр Structural экземпляра и свойства материалов не участвуют.
-- Расчётную ось и наружное сечение MEP, изоляцию, интервалы взаимодействия, нормаль и локальные оси отверстия, опорную точку и исходную грань.
-- Окончательные размеры и форму, положение, тип семейства, версию алгоритма, отпечаток настроек и идентификатор запуска. Единицы — внутренние футы Revit и единичные векторы.
+## Verification
 
-Условие определяется источником/UniqueId MEP, выбранной базой и точным набором source/UniqueId/индекс слоя/отпечаток определения участвующих конструкций. Порядок перечисления участников не влияет на сравнение. Координаты, угол и размеры отверстия являются состоянием, а не постоянным ключом условия.
+The v0.9.8 package passed **300 local automated tests** during repository preparation:
 
-Правила синхронизации:
+```bash
+python -m unittest discover -s tests -q
+```
 
-- То же условие и то же фактическое/расчётное состояние — сохранить экземпляр. Изменения только служебных данных записать в Entity.
-- То же условие, но изменились положение, ориентация, форма, тип или размеры — заменить экземпляр с сохранением OpeningGuid.
-- Изменились участники, база, отмеченный базовый слой, функции или толщины слоёв — создать новое отверстие с новым OpeningGuid и удалить старое после успешной проверки. Переноса GUID между условиями нет.
-- Добавление/удаление стен, разделение/объединение групп не требуют поиска наследника GUID: старые условия удаляются, новые создаются с новыми GUID.
-- MEP подтверждённо удалён либо успешно проверен и больше не требует проходки — удалить устаревший управляемый экземпляр. Очистка работает и при отсутствии всех MEP.
-- Ошибка расчёта, недоступная связь либо отказ привязки — сохранить связанное старое отверстие и вывести причину. Отсутствие расчёта не равно отсутствию проходки. Независимые достоверные проходки продолжают обрабатываться.
-- Дубли GUID, дубли одного условия, несовместимые версии данных или нечитаемая Entity не разрешаются произвольным наследованием. Неуправляемые экземпляры не изменяются.
-
-Перемещение существующей конструкции обычно сохраняет её UniqueId. При прежнем условии новое положение и размеры сверяются с актуальной геометрией. Изменения материалов и внутреннего состава типа сами по себе не анализируются.
-
-Проекция точки привязки должна принадлежать реальной области исходной грани. При невозможности привязки новое отверстие не создаётся, соответствующее старое сохраняется. Расширение не продолжает плоскость за контур и не смещает отверстие ради привязки.
-
-Все действия заранее рассчитываются и фиксируются одной транзакцией HDL Create Openings. Новый экземпляр проходит проверки до удаления предшественника. Ошибка создания, удаления или записи Entity откатывает весь набор. Один Undo возвращает исходные экземпляры, Redo восстанавливает весь результат. Отчёт разделяет create, replace, delete, refresh, keep, retain и skip. Base layer показывает выбранную конструкцию, Structural, функцию и толщину слоя, координаты сравнения.
-
-Установка 0.8.0 поверх 0.7.x: прежние Payload 3–6 относятся к другим правилам определения условия. Успешно проверенные проходки внутри Scope Box пересоздаются один раз с новыми GUID. Снаружи области и при неопределённости старые экземпляры сохраняются. Далее используется Payload 7. Нумерация и перенос аннотаций вне текущего объёма.
-
-## Проверка
-
-`python -m unittest discover -s tests -v`
-
-240 локальных тестов. Новые проверки: оба признака слоя обязательны; Structure [1] без галочки отклоняется; неверная функция с галочкой отклоняется; более толстый неотмеченный слой не заменяет отмеченный; Structural экземпляра не читается; единые правила для стен/перекрытий/крыш; пример 100 мм + 20 мм при ThroughAll 0/1. Сохранены регрессии геометрии, коронок, настроек, Scope Box, синхронизации, GUID и единой транзакции. API-зависимые проверки выполняются на подстановках. В Revit версия ещё не проверена.
-
-
-## Create / Update fix — v0.9.6
-
-Unsupported construction geometry is checked against each individual opening
-volume, including the clearance already included in its dimensions. The full
-MEP bounding box no longer blocks unrelated passages. Bounding boxes provide
-only the preliminary filter; transformed physical construction Solids determine
-the final overlap. Failed-host Solids are extracted lazily and cached per run.
-
-A local overlap with an unsupported host, missing local Solid, or Boolean failure
-preserves existing openings and skips affected new passages. Diagnostic reasons
-include the link name, host ID, MEP ID, and check stage. Variable structural base
-layers still require separate local-thickness support. Eligibility remains
-Function = Structure [1] AND Structural Material = Yes.
-
-Validation: 295 automated tests, including 11 passage-local regression checks.
-Revit model validation is still required; no Revit runtime was available here.
+Coverage includes sizing, core selection, insulation, structural layers, ThroughAll, Scope Box, settings, synchronization, passage-local coverage, identification and multi-model numbering. API-dependent tests use substitutes. They do not verify Revit's actual geometry kernel, family hosting, ribbon or transaction execution. Target-project runtime verification remains necessary. Earlier test counts and runtime status in the original notes refer to historical releases.

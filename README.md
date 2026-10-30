@@ -36,7 +36,7 @@ Requires Autodesk Revit with pyRevit. Revit and pyRevit are not included. A supp
 | `BL Opening Rect Floor` | `Width`, `Height`, `Depth` | Work Plane-Based on, Always Vertical off |
 | `BL Opening Round Floor` | `Diameter`, `Depth` | Work Plane-Based on, Always Vertical off |
 
-Dimension parameters must be writable instance Length parameters. Roof openings use the floor families. Family origins, local axes and depth direction must match the contract in [Development notes](docs/DEVELOPMENT_NOTES.md#семейства-и-параметры).
+Dimension parameters must be writable instance Length parameters. Roof openings use the floor families. Family origins, local axes and depth direction must match the contract in [Development notes](docs/DEVELOPMENT_NOTES.md#family-and-parameter-contract).
 
 Number Openings requires a writable Text instance parameter named `SP_OP_Id`. Identify MEP requires a writable Text instance parameter named `SP_OP_MEP_Elements`; see its detailed documentation for the stored value and metadata.
 
@@ -71,6 +71,7 @@ These tests cover calculation and orchestration logic using Revit API substitute
 ## Documentation
 
 - [Identify MEP: mapping, geometry and stored data](IDENTIFY_MEP_README.md)
-- [Development notes and earlier version history](docs/DEVELOPMENT_NOTES.md) — historical notes may describe older behavior; use this README for the current package overview.
+- [Development notes in English](docs/DEVELOPMENT_NOTES.md) — technical overview, geometry, settings, synchronization and version history.
+- [Original development notes in Russian](docs/DEVELOPMENT_NOTES.ru.md) — preserved implementation history; historical statements refer to their respective releases.
 
 Report reproducible problems in [Issues](https://github.com/havrikov-bim/HDL-Openings/issues), including command version, Revit/pyRevit versions, expected result, actual result and a relevant diagnostic report.
