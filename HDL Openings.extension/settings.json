@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "clearance_mm": 25.0,
+  "gap_mm": 50.0,
+  "touch_mm": 25.0,
+  "k_slope": 1.5,
+  "max_core_depth_mm": 1000.0,
+  "rect_size_step_mm": 50.0,
+  "core_diameters_inch": [
+    1,
+    1.25,
+    1.5,
+    2,
+    3,
+    4,
+    5,
+    6,
+    8,
+    10,
+    12
+  ],
+  "families": {
+    "rect_wall": "BL Opening Rect Wall",
+    "rect_floor": "BL Opening Rect Floor",
+    "round_wall": "BL Opening Round Wall",
+    "round_floor": "BL Opening Round Floor"
+  },
+  "sync_length_tolerance_mm": 0.1,
+  "sync_angle_tolerance_deg": 0.01,
+  "ThroughAll": 1
+}

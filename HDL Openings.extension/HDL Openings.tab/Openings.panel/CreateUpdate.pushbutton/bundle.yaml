@@ -1,0 +1,5 @@
+title: "Create / Update"
+tooltip: Create and update rectangular and round openings inside the selected Scope Box in one Undo/Redo operation.
+author: HDL
+engine:
+  persistent: true
